@@ -1,4 +1,5 @@
 #include "msgpack11.hpp"
+#include "..\h\none.h"
 #include <array>
 #include <cassert>
 #include <cmath>
@@ -9,10 +10,14 @@
 #include <tuple>
 #include <algorithm>
 #include <functional>
+#include <exception>
 #include <stdexcept>
 #include <type_traits>
+#include <typeindex>
 #include <utility>
 #include <bit>
+#include <unordered_map>
+#include <map>
 
 namespace msgpack11
 {
@@ -27,50 +32,68 @@ namespace msgpack11
  * operators so the helpers in MsgPackValue work. We can't use nullptr_t because
  * it may not be orderable.
  */
-	struct NullStruct
-	{
-		bool operator==(NullStruct) const
-		{
-			return true;
-		}
-		std::strong_ordering operator<=>(NullStruct) const
-		{
-			return std::strong_ordering::equal;
-		}
-	};
 	
 	/* * * * * * * * * * * * * * * * * * * *
  * MasPackValue
  */
 	
+	class TypeError : public std::runtime_error
+	{
+	public:
+		TypeError(std::type_index expected,std::type_index got):
+			std::runtime_error(std::string()+"expected "+expected.name()+", but got "+got.name()){}
+			~TypeError()=default;
+	};
+	
 	class MsgPackValue
 	{
 	public:
-		virtual bool operator==(const MsgPackValue &other) const = 0;
-		virtual std::partial_ordering operator<=>(const MsgPackValue &other) const = 0;
-		virtual void dump(std::ostream& os) const = 0;
-		virtual MsgPack::Type type() const = 0;
-		virtual double number_value() const;
-		virtual float float32_value() const;
-		virtual double float64_value() const;
-		virtual __int128 int_value() const;
-		virtual int8_t int8_value() const;
-		virtual int16_t int16_value() const;
-		virtual int32_t int32_value() const;
-		virtual int64_t int64_value() const;
-		virtual uint8_t uint8_value() const;
-		virtual uint16_t uint16_value() const;
-		virtual uint32_t uint32_value() const;
-		virtual uint64_t uint64_value() const;
-		virtual bool bool_value() const;
-		virtual const std::string &string_value() const;
-		virtual const MsgPack::array &array_items() const;
-		virtual const MsgPack::binary &binary_items() const;
-		virtual const MsgPack &operator[](size_t i) const;
-		virtual const MsgPack::object &object_items() const;
-		virtual const MsgPack &operator[](const std::string &key) const;
-		virtual const MsgPack::extension &extension_items() const;
-		virtual ~MsgPackValue() {}
+		MsgPack::Type type()                                            const;
+		virtual bool operator==(const MsgPackValue &other)              const=0;
+		virtual std::partial_ordering operator<=>(const MsgPackValue&)  const=0;
+		virtual void dump(std::ostream& os)                             const=0;
+		//immutable type specify
+		virtual explicit operator MsgPack::float32          ()const;
+		virtual explicit operator MsgPack::float64          ()const;
+		virtual explicit operator MsgPack::int128           ()const;
+		virtual explicit operator MsgPack::int8             ()const;
+		virtual explicit operator MsgPack::int16            ()const;
+		virtual explicit operator MsgPack::int32            ()const;
+		virtual explicit operator MsgPack::int64            ()const;
+		virtual explicit operator MsgPack::uint8            ()const;
+		virtual explicit operator MsgPack::uint16           ()const;
+		virtual explicit operator MsgPack::uint32           ()const;
+		virtual explicit operator MsgPack::uint64           ()const;
+		virtual explicit operator MsgPack::boolean          ()const;
+		virtual explicit operator MsgPack::string    const &()const;
+		virtual explicit operator MsgPack::array     const &()const;
+		virtual explicit operator MsgPack::binary    const &()const;
+		virtual explicit operator MsgPack::object    const &()const;
+		virtual explicit operator MsgPack::extension const &()const;
+		//mutable type specify
+		virtual explicit operator MsgPack::float32    &();
+		virtual explicit operator MsgPack::float64    &();
+		virtual explicit operator MsgPack::int128     &();
+		virtual explicit operator MsgPack::int8       &();
+		virtual explicit operator MsgPack::int16      &();
+		virtual explicit operator MsgPack::int32      &();
+		virtual explicit operator MsgPack::int64      &();
+		virtual explicit operator MsgPack::uint8      &();
+		virtual explicit operator MsgPack::uint16     &();
+		virtual explicit operator MsgPack::uint32     &();
+		virtual explicit operator MsgPack::uint64     &();
+		virtual explicit operator MsgPack::boolean    &();
+		virtual explicit operator MsgPack::string     &();
+		virtual explicit operator MsgPack::array      &();
+		virtual explicit operator MsgPack::binary     &();
+		virtual explicit operator MsgPack::object     &();
+		virtual explicit operator MsgPack::extension  &();
+		//member accessing
+		virtual MsgPack            const &operator[](size_t i)          const;
+		virtual MsgPack                  &operator[] (size_t i);
+		virtual MsgPack            const &operator[](const MsgPack &key)const;
+		virtual MsgPack                  &operator[](const MsgPack &key);
+		virtual ~MsgPackValue()=default;
 	};
 	
 	/* * * * * * * * * * * * * * * * * * * *
@@ -107,18 +130,18 @@ namespace msgpack11
 			}
 		}
 		
-		inline void dump(NullStruct, std::ostream& os)
+		inline void dump(reverSilly::none, std::ostream& os)
 		{
 			os.put(0xc0);
 		}
 		
-		inline void dump(float value, std::ostream& os)
+		inline void dump(MsgPack::float32 value, std::ostream& os)
 		{
 			os.put(0xca);
 			dump_data(value, os);
 		}
 		
-		inline void dump(double value, std::ostream& os)
+		inline void dump(MsgPack::float64 value, std::ostream& os)
 		{
 			os.put(0xcb);
 			dump_data(value, os);
@@ -135,7 +158,7 @@ namespace msgpack11
 		
 		inline void dump(uint16_t value, std::ostream& os)
 		{
-			if( value < (1 << 8) )
+			if( value < (1<<8) )
 			{
 				dump(static_cast<uint8_t>(value), os );
 			}
@@ -232,7 +255,7 @@ namespace msgpack11
 			}
 		}
 		
-		inline void dump(bool value, std::ostream& os)
+		inline void dump(MsgPack::boolean value, std::ostream& os)
 		{
 			const uint8_t msgpack_value = (value) ? 0xc3 : 0xc2;
 			os.put(msgpack_value);
@@ -295,10 +318,8 @@ namespace msgpack11
 			{
 				throw std::runtime_error("exceeded maximum data length");
 			}
-			
-			std::for_each(std::begin(value), std::end(value), [&os](MsgPack::array::value_type const& v){
-				os << v;
-				});
+			for(const auto&v:value)
+				os<<v;
 		}
 		
 		inline void dump(const MsgPack::object& value, std::ostream& os)
@@ -323,11 +344,8 @@ namespace msgpack11
 			{
 				throw std::runtime_error("too long value.");
 			}
-			
-			std::for_each(std::begin(value), std::end(value), [&os](MsgPack::object::value_type const& v){
-				os << v.first;
-				os << v.second;
-				});
+			for(const auto &v:value)
+				os<<v.first<<v.second;
 		}
 		
 		inline void dump(const MsgPack::binary& value, std::ostream& os)
@@ -407,72 +425,42 @@ namespace msgpack11
  * Value wrappers
  */
 	
-	template <MsgPack::Type tag, typename T>
+	template <typename T>
 	class Value : public MsgPackValue
 	{
-	protected:
-		
+	public:
 		// Constructors
-		explicit Value(const T &value) : m_value(value) {}
-		explicit Value(T &&value)      : m_value(std::move(value)) {}
-		
-		// Get type tag
-		MsgPack::Type type() const override
-		{
-			return tag;
-		}
-		
+		Value(T value) requires(std::is_fundamental_v<T>):m_value(value){}
+		Value(const T& value) requires(std::is_class_v<T>):m_value(value){}
+		Value(T&& value) requires(std::is_class_v<T>):m_value(std::move(value)){}
+		Value():m_value(){}
 		// Comparisons
 		virtual bool operator==(const MsgPackValue &other) const override
 		{
-			return (tag==other.type())&&
-				(m_value==static_cast<const Value<tag, T>&>(other).m_value);
+			return (type()==other.type())&&(m_value==static_cast<const Value<T>&>(other).m_value);
 		}
 		virtual std::partial_ordering operator<=>(const MsgPackValue &other) const override
 		{
-			if(tag<=>other.type()!=0)
-				return tag<=>other.type();
+			if(type()<=>other.type()!=0)
+				return type()<=>other.type();
 			else
 			{
-				if(tag==other.type())
-					return m_value<=>static_cast<const Value<tag,T>&>(other).m_value;
+				if(type()==other.type())
+					return m_value<=>static_cast<const Value<T>&>(other).m_value;
 				else
 					return std::partial_ordering::unordered;
 			}
 		}
-		
-		const T m_value;
-		void dump(std::ostream& os) const override { msgpack11::dump(m_value, os); }
+		T m_value;
+		virtual void dump(std::ostream& os) const override { msgpack11::dump(m_value, os); }
+		virtual explicit operator T&(){return m_value;}
 	};
 	
-//	bool equal_uint64_int64( uint64_t uint64_value, int64_t int64_value )
-//	{
-//		bool const is_positive = 0 <= int64_value;
-//		bool const is_leq_int64_max = uint64_value <= std::numeric_limits<int64_t>::max();
-//		return is_positive && is_leq_int64_max && ( uint64_value == static_cast<uint64_t>(int64_value));
-//	}
-//
-//	bool less_uint64_int64( uint64_t uint64_value, int64_t int64_value )
-//	{
-//		bool const is_positive = 0 <= int64_value;
-//		bool const is_leq_int64_max = uint64_value <= std::numeric_limits<int64_t>::max();
-//		return is_positive && is_leq_int64_max && ( uint64_value < static_cast<uint64_t>(int64_value));
-//	}
-//	
-//	bool less_int64_uint64( int64_t int64_value, uint64_t uint64_value )
-//	{
-//		bool const is_negative = int64_value < 0;
-//		bool const is_gt_int64_max = std::numeric_limits<int64_t>::max() < uint64_value;
-//		return is_negative || is_gt_int64_max || ( static_cast<uint64_t>(int64_value) < uint64_value );
-//	}
-	
-	template<MsgPack::Type tag, typename T>
-	class NumberValue : public Value<tag, T>
+	template<typename T> requires(std::is_fundamental_v<T>)
+	class Number final: public Value<T>
 	{
-	protected:
-		// Constructors
-		explicit NumberValue(const T &value) : Value<tag, T>(value) {}
-		explicit NumberValue(T &&value)      : Value<tag, T>(move(value)) {}
+	public:
+		Number(T value):Value<T>(value){}
 		
 		bool operator ==(const MsgPackValue &other) const override
 		{
@@ -481,7 +469,7 @@ namespace msgpack11
 				case MsgPack::Type::FLOAT32 : // fall through
 				case MsgPack::Type::FLOAT64 : // fall through
 				{
-					return float64_value()==other.float64_value();
+					return operator MsgPack::float64()==other.operator MsgPack::float64();
 				} break;
 				case MsgPack::Type::UINT8   : // fall through
 				case MsgPack::Type::UINT16  : // fall through
@@ -492,11 +480,11 @@ namespace msgpack11
 				case MsgPack::Type::INT32   : // fall through
 				case MsgPack::Type::INT64   : // fall through
 				{
-					return int_value()==other.int_value();
+					return operator MsgPack::int128()==other.operator MsgPack::int128();
 				} break;
 				default:
 					{
-						return Value<tag,T>::operator ==(other);
+						return Value<T>::operator ==(other);
 					} break;
 			}
 		}
@@ -508,7 +496,7 @@ namespace msgpack11
 				case MsgPack::Type::FLOAT32 : // fall through
 				case MsgPack::Type::FLOAT64 : // fall through
 				{
-					return float64_value()<=>other.float64_value();
+					return operator MsgPack::float64()<=>other.operator MsgPack::float64();
 				} break;
 				case MsgPack::Type::UINT8   : // fall through
 				case MsgPack::Type::UINT16  : // fall through
@@ -519,275 +507,274 @@ namespace msgpack11
 				case MsgPack::Type::INT32   : // fall through
 				case MsgPack::Type::INT64   : // fall through
 				{
-					return int_value()<=>other.int_value();
+					return operator MsgPack::int128()<=>other.operator MsgPack::int128();
 				} break;
 				default:
 					{
-						return Value<tag,T>::operator<=>(other);
-						
+						return Value<T>::operator<=>(other);
 					} break;
 			}
 		}
+		virtual explicit operator MsgPack::float32   ()const override{return static_cast<MsgPack::float32>(Value<T>::m_value);}
+		virtual explicit operator MsgPack::float64   ()const override{return static_cast<MsgPack::float64>(Value<T>::m_value);}
+		virtual explicit operator MsgPack::int8      ()const override{return static_cast<MsgPack::int8>   (Value<T>::m_value);}
+		virtual explicit operator MsgPack::int16     ()const override{return static_cast<MsgPack::int16>  (Value<T>::m_value);}
+		virtual explicit operator MsgPack::int32     ()const override{return static_cast<MsgPack::int32>  (Value<T>::m_value);}
+		virtual explicit operator MsgPack::int64     ()const override{return static_cast<MsgPack::int64>  (Value<T>::m_value);}
+		virtual explicit operator MsgPack::uint8     ()const override{return static_cast<MsgPack::uint8>  (Value<T>::m_value);}
+		virtual explicit operator MsgPack::uint16    ()const override{return static_cast<MsgPack::uint16> (Value<T>::m_value);}
+		virtual explicit operator MsgPack::uint32    ()const override{return static_cast<MsgPack::uint32> (Value<T>::m_value);}
+		virtual explicit operator MsgPack::uint64    ()const override{return static_cast<MsgPack::uint64> (Value<T>::m_value);}
+		virtual explicit operator MsgPack::int128    ()const override{return static_cast<MsgPack::int128> (Value<T>::m_value);}
+		virtual explicit operator MsgPack::boolean   ()const override{return static_cast<MsgPack::boolean>(Value<T>::m_value);}
+	};
+	
+	template class Number<MsgPack::float32>;
+	template class Number<MsgPack::float64>;
+	template class Number<MsgPack::int8>;
+	template class Number<MsgPack::int16>;
+	template class Number<MsgPack::int32>;
+	template class Number<MsgPack::int64>;
+	template class Number<MsgPack::uint8>;
+	template class Number<MsgPack::uint16>;
+	template class Number<MsgPack::uint32>;
+	template class Number<MsgPack::uint64>;
+	template class Number<MsgPack::boolean>;
+	
+	template<typename T> requires(std::is_class_v<T>)
+	class Compound final: public Value<T>
+	{
+	public:
+		virtual operator const T&() const override{return Value<T>::m_value;}
+		Compound(const T& thing):Value<T>(thing){}
+		Compound(T&& thing):Value<T>(thing){}
 		
-		virtual double number_value()       const override{ return static_cast<double>( Value<tag,T>::m_value ); }
-		virtual float float32_value()       const override{ return static_cast<float>( Value<tag,T>::m_value ); }
-		virtual double float64_value()      const override{ return static_cast<double>( Value<tag,T>::m_value ); }
-		virtual __int128 int_value()        const override{ return static_cast<__int128>( Value<tag,T>::m_value ); }
+		const MsgPack & operator[](size_t i) const override
+		{
+			if constexpr(std::is_same_v<T,MsgPack::array>)
+				return Value<T>::m_value.at(i);
+			else
+				throw TypeError(typeid(MsgPack::array),typeid(T));
+		}
+		MsgPack & operator[](size_t i) override
+		{
+			if constexpr(std::is_same_v<T,MsgPack::array>)
+				return Value<T>::m_value.at(i);
+			else
+				throw TypeError(typeid(MsgPack::array),typeid(T));
+		}
 		
-		virtual int8_t int8_value()         const override{ return static_cast<int8_t>( Value<tag,T>::m_value ); }
-		virtual int16_t int16_value()       const override{ return static_cast<int16_t> ( Value<tag,T>::m_value ); }
-		virtual int32_t int32_value()       const override{ return static_cast<int32_t> ( Value<tag,T>::m_value ); }
-		virtual int64_t int64_value()       const override{ return static_cast<int64_t> ( Value<tag,T>::m_value ); }
-		virtual uint8_t uint8_value()       const override{ return static_cast<uint8_t> ( Value<tag,T>::m_value ); }
-		virtual uint16_t uint16_value()     const override{ return static_cast<uint16_t>( Value<tag,T>::m_value ); }
-		virtual uint32_t uint32_value()     const override{ return static_cast<uint32_t>( Value<tag,T>::m_value ); }
-		virtual uint64_t uint64_value()     const override{ return static_cast<uint64_t>( Value<tag,T>::m_value ); }
+		MsgPack const &operator[](const MsgPack &key) const override
+		{
+			if constexpr(std::is_same_v<T,MsgPack::object>)
+				return Value<T>::m_value.at(key);
+			else
+				throw TypeError(typeid(MsgPack::object),typeid(T));
+		}
+		MsgPack& operator[](const MsgPack &key) override
+		{
+			if constexpr(std::is_same_v<T,MsgPack::object>)
+				return Value<T>::m_value[key];
+			else
+				throw TypeError(typeid(MsgPack::object),typeid(T));
+		}
 	};
+	template class Compound<MsgPack::string>;
+	template class Compound<MsgPack::array>;
+	template class Compound<MsgPack::binary>;
+	template class Compound<MsgPack::object>;
+	template class Compound<MsgPack::extension>;
 	
-	class MsgPackFloat final : public NumberValue<MsgPack::Type::FLOAT32, float>
+	template class Value<reverSilly::none>;
+	
+	MsgPack::Type MsgPackValue::type()const
 	{
-	public:
-		explicit MsgPackFloat(float value) : NumberValue(value) {}
-	};
-	
-	class MsgPackDouble final : public NumberValue<MsgPack::Type::FLOAT64, double>
-	{
-	public:
-		explicit MsgPackDouble(double value) : NumberValue(value) {}
-	};
-	
-	class MsgPackInt8 final : public NumberValue<MsgPack::Type::INT8, int8_t>
-	{
-	public:
-		explicit MsgPackInt8(int8_t value) : NumberValue(value) {}
-	};
-	
-	class MsgPackInt16 final : public NumberValue<MsgPack::Type::INT16, int16_t>
-	{
-	public:
-		explicit MsgPackInt16(int16_t value) : NumberValue(value) {}
-	};
-	
-	class MsgPackInt32 final : public NumberValue<MsgPack::Type::INT32, int32_t>
-	{
-	public:
-		explicit MsgPackInt32(int32_t value) : NumberValue(value) {}
-	};
-	
-	class MsgPackInt64 final : public NumberValue<MsgPack::Type::INT64, int64_t>
-	{
-	public:
-		explicit MsgPackInt64(int64_t value) : NumberValue(value) {}
-	};
-	
-	class MsgPackUint8 final : public NumberValue<MsgPack::Type::UINT8, uint8_t>
-	{
-	public:
-		explicit MsgPackUint8(uint8_t value) : NumberValue(value) {}
-	};
-	
-	class MsgPackUint16 final : public NumberValue<MsgPack::Type::UINT16, uint16_t>
-	{
-	public:
-		explicit MsgPackUint16(uint16_t value) : NumberValue(value) {}
-	};
-	
-	class MsgPackUint32 final : public NumberValue<MsgPack::Type::UINT32, uint32_t>
-	{
-	public:
-		explicit MsgPackUint32(uint32_t value) : NumberValue(value) {}
-	};
-	
-	class MsgPackUint64 final : public NumberValue<MsgPack::Type::UINT64, uint64_t>
-	{
-	public:
-		explicit MsgPackUint64(uint64_t value) : NumberValue(value) {}
-	};
-	
-	class MsgPackBoolean final : public Value<MsgPack::Type::BOOL, bool>
-	{
-		bool bool_value() const override { return m_value; }
-	public:
-		explicit MsgPackBoolean(bool value) : Value(value) {}
-	};
-	
-	class MsgPackString final : public Value<MsgPack::Type::STRING,std::string>
-	{
-		const std::string &string_value() const override { return m_value; }
-	public:
-		explicit MsgPackString(const std::string &value) : Value(value) {}
-		explicit MsgPackString(std::string &&value)      : Value(move(value)) {}
-	};
-	
-	class MsgPackArray final : public Value<MsgPack::Type::ARRAY, MsgPack::array>
-	{
-		const MsgPack::array &array_items() const override { return m_value; }
-		const MsgPack & operator[](size_t i) const override;
-	public:
-		explicit MsgPackArray(const MsgPack::array &value) : Value(value) {}
-		explicit MsgPackArray(MsgPack::array &&value)      : Value(move(value)) {}
-	};
-	
-	class MsgPackBinary final : public Value<MsgPack::Type::BINARY, MsgPack::binary> {
-		const MsgPack::binary &binary_items() const override { return m_value; }
-	public:
-		explicit MsgPackBinary(const MsgPack::binary &value) : Value(value) {}
-		explicit MsgPackBinary(MsgPack::binary &&value)      : Value(move(value)) {}
-	};
-	
-	class MsgPackObject final : public Value<MsgPack::Type::OBJECT, MsgPack::object> {
-		const MsgPack::object &object_items() const override { return m_value; }
-		const MsgPack & operator[](const std::string &key) const override;
-	public:
-		explicit MsgPackObject(const MsgPack::object &value) : Value(value) {}
-		explicit MsgPackObject(MsgPack::object &&value)      : Value(move(value)) {}
-	};
-	
-	class MsgPackExtension final : public Value<MsgPack::Type::EXTENSION, MsgPack::extension>
-	{
-		const MsgPack::extension &extension_items() const override { return m_value; }
-	public:
-		explicit MsgPackExtension(const MsgPack::extension &value) : Value(value) {}
-		explicit MsgPackExtension(MsgPack::extension &&value)      : Value(move(value)) {}
-	};
-	
-	class MsgPackNull final : public Value<MsgPack::Type::NUL, NullStruct> {
-	public:
-		MsgPackNull() : Value({}) {}
-	};
-	
-	/* * * * * * * * * * * * * * * * * * * *
- * Static globals - static-init-safe
- */
-	struct Statics
-	{
-		const std::shared_ptr<MsgPackValue> null=std::make_shared<MsgPackNull>();
-		const std::shared_ptr<MsgPackValue> t=std::make_shared<MsgPackBoolean>(true);
-		const std::shared_ptr<MsgPackValue> f=std::make_shared<MsgPackBoolean>(false);
-		const std::string empty_string;
-		const std::deque<MsgPack> empty_array;
-		const std::unordered_map<MsgPack, MsgPack> empty_object;
-		const MsgPack::binary empty_binary;
-		const MsgPack::extension empty_extension;
-		Statics() {}
-	};
-	
-	static const Statics & statics()
-	{
-		static const Statics s {};
-		return s;
+		static const std::unordered_map<std::type_index,MsgPack::Type>table
+		{
+			{typeid(Number<MsgPack::float32>),MsgPack::Type::FLOAT32},
+			{typeid(Number<MsgPack::float64>),MsgPack::Type::FLOAT64},
+			{typeid(Number<MsgPack::int8>),MsgPack::Type::INT8},
+			{typeid(Number<MsgPack::int16>),MsgPack::Type::INT16},
+			{typeid(Number<MsgPack::int32>),MsgPack::Type::INT32},
+			{typeid(Number<MsgPack::int64>),MsgPack::Type::INT64},
+			{typeid(Number<MsgPack::uint8>),MsgPack::Type::UINT8},
+			{typeid(Number<MsgPack::uint16>),MsgPack::Type::UINT16},
+			{typeid(Number<MsgPack::uint32>),MsgPack::Type::UINT32},
+			{typeid(Number<MsgPack::uint64>),MsgPack::Type::UINT64},
+			{typeid(Number<MsgPack::boolean>),MsgPack::Type::BOOL},
+			{typeid(Compound<MsgPack::array>),MsgPack::Type::ARRAY},
+			{typeid(Compound<MsgPack::extension>),MsgPack::Type::EXTENSION},
+			{typeid(Compound<MsgPack::object>),MsgPack::Type::OBJECT},
+			{typeid(Compound<MsgPack::binary>),MsgPack::Type::BINARY},
+			{typeid(Compound<MsgPack::string>),MsgPack::Type::STRING},
+			{typeid(Value<reverSilly::none>),MsgPack::Type::NUL}
+		};
+		return table.at(typeid(*this));
 	}
-	
-	static const MsgPack & static_null()
-	{
-		// This has to be separate, not in Statics, because MsgPack() accesses statics().null.
-		static const MsgPack msgpack_null;
-		return msgpack_null;
-	}
-	
 	/* * * * * * * * * * * * * * * * * * * *
  * Constructors
  */
 	
-	MsgPack::MsgPack() noexcept                        : m_ptr(statics().null) {}
-	MsgPack::MsgPack(std::nullptr_t) noexcept          : m_ptr(statics().null) {}
-	MsgPack::MsgPack(float value)                      : m_ptr(std::make_shared<MsgPackFloat>(value)) {}
-	MsgPack::MsgPack(double value)                     : m_ptr(std::make_shared<MsgPackDouble>(value)) {}
-	MsgPack::MsgPack(int8_t value)                     : m_ptr(std::make_shared<MsgPackInt8>(value)) {}
-	MsgPack::MsgPack(int16_t value)                    : m_ptr(std::make_shared<MsgPackInt16>(value)) {}
-	MsgPack::MsgPack(int32_t value)                    : m_ptr(std::make_shared<MsgPackInt32>(value)) {}
-	MsgPack::MsgPack(int64_t value)                    : m_ptr(std::make_shared<MsgPackInt64>(value)) {}
-	MsgPack::MsgPack(uint8_t value)                    : m_ptr(std::make_shared<MsgPackUint8>(value)) {}
-	MsgPack::MsgPack(uint16_t value)                   : m_ptr(std::make_shared<MsgPackUint16>(value)) {}
-	MsgPack::MsgPack(uint32_t value)                   : m_ptr(std::make_shared<MsgPackUint32>(value)) {}
-	MsgPack::MsgPack(uint64_t value)                   : m_ptr(std::make_shared<MsgPackUint64>(value)) {}
-	MsgPack::MsgPack(bool value)                       : m_ptr(value ? statics().t : statics().f) {}
-	MsgPack::MsgPack(const std::string &value)         : m_ptr(std::make_shared<MsgPackString>(value)) {}
-	MsgPack::MsgPack(std::string &&value)              : m_ptr(std::make_shared<MsgPackString>(move(value))) {}
-	MsgPack::MsgPack(const char * value)               : m_ptr(std::make_shared<MsgPackString>(value)) {}
-	MsgPack::MsgPack(const MsgPack::array &values)     : m_ptr(std::make_shared<MsgPackArray>(values)) {}
-	MsgPack::MsgPack(MsgPack::array &&values)          : m_ptr(std::make_shared<MsgPackArray>(move(values))) {}
-	MsgPack::MsgPack(const MsgPack::object &values)    : m_ptr(std::make_shared<MsgPackObject>(values)) {}
-	MsgPack::MsgPack(MsgPack::object &&values)         : m_ptr(std::make_shared<MsgPackObject>(move(values))) {}
-	MsgPack::MsgPack(const MsgPack::binary &values)    : m_ptr(std::make_shared<MsgPackBinary>(values)) {}
-	MsgPack::MsgPack(MsgPack::binary &&values)         : m_ptr(std::make_shared<MsgPackBinary>(move(values))) {}
-	MsgPack::MsgPack(const MsgPack::extension &values) : m_ptr(std::make_shared<MsgPackExtension>(values)) {}
-	MsgPack::MsgPack(MsgPack::extension &&values)      : m_ptr(std::make_shared<MsgPackExtension>(move(values))) {}
+	MsgPack::MsgPack()                                 : m_ptr(std::make_shared<Value<reverSilly::none>>()){}
+	MsgPack::MsgPack(std::nullptr_t)                   : m_ptr(std::make_shared<Value<reverSilly::none>>()){}
+//	
+//	template<typename T> requires(std::is_fundamental_v<T>)
+//	MsgPack::MsgPack(T value):m_ptr(std::make_shared<Number<T>>(value)){}
+//	
+//	template MsgPack::MsgPack(MsgPack::float32);
+//	template MsgPack::MsgPack(MsgPack::float64);
+//	template MsgPack::MsgPack(MsgPack::int8);
+//	template MsgPack::MsgPack(MsgPack::int16);
+//	template MsgPack::MsgPack(MsgPack::int32);
+//	template MsgPack::MsgPack(MsgPack::int64);
+//	template MsgPack::MsgPack(MsgPack::uint8);
+//	template MsgPack::MsgPack(MsgPack::uint16);
+//	template MsgPack::MsgPack(MsgPack::uint32);
+//	template MsgPack::MsgPack(MsgPack::uint64);
+//	template MsgPack::MsgPack(MsgPack::boolean);
+//	
+//	template<typename T> requires(std::is_class_v<T>)
+//	MsgPack::MsgPack(const T& value):m_ptr(std::make_shared<Compound<T>>(value)){}
+//	template<typename T> requires(std::is_class_v<T>)
+//	MsgPack::MsgPack(T&& value):m_ptr(std::make_shared<Compound<T>>(value)){}
+//	
+//	template MsgPack::MsgPack(MsgPack::array&&);
+//	template MsgPack::MsgPack(MsgPack::array const&);
+//	template MsgPack::MsgPack(MsgPack::object&&);
+//	template MsgPack::MsgPack(MsgPack::object const&);
+//	template MsgPack::MsgPack(MsgPack::extension&&);
+//	template MsgPack::MsgPack(MsgPack::extension const&);
+//	template MsgPack::MsgPack(MsgPack::binary&&);
+//	template MsgPack::MsgPack(MsgPack::binary const&);
+//	template MsgPack::MsgPack(MsgPack::string&&);
+//	template MsgPack::MsgPack(MsgPack::string const&);
+
+	MsgPack::MsgPack(MsgPack::float32 value)           : m_ptr(std::make_shared<Number<MsgPack::float32>>(value)) {}
+	MsgPack::MsgPack(MsgPack::float64 value)           : m_ptr(std::make_shared<Number<MsgPack::float64>>(value)) {}
+	MsgPack::MsgPack(MsgPack::int8 value)              : m_ptr(std::make_shared<Number<MsgPack::int8>>(value)) {}
+	MsgPack::MsgPack(MsgPack::int16 value)             : m_ptr(std::make_shared<Number<MsgPack::int16>>(value)) {}
+	MsgPack::MsgPack(MsgPack::int32 value)             : m_ptr(std::make_shared<Number<MsgPack::int32>>(value)) {}
+	MsgPack::MsgPack(MsgPack::int64 value)             : m_ptr(std::make_shared<Number<MsgPack::int64>>(value)) {}
+	MsgPack::MsgPack(MsgPack::uint8 value)             : m_ptr(std::make_shared<Number<MsgPack::uint8>>(value)) {}
+	MsgPack::MsgPack(MsgPack::uint16 value)            : m_ptr(std::make_shared<Number<MsgPack::uint16>>(value)) {}
+	MsgPack::MsgPack(MsgPack::uint32 value)            : m_ptr(std::make_shared<Number<MsgPack::uint32>>(value)) {}
+	MsgPack::MsgPack(MsgPack::uint64 value)            : m_ptr(std::make_shared<Number<MsgPack::uint64>>(value)) {}
+	MsgPack::MsgPack(MsgPack::boolean value)           : m_ptr(std::make_shared<Number<MsgPack::boolean>>(value)) {}
+	MsgPack::MsgPack(const MsgPack::string &value)     : m_ptr(std::make_shared<Compound<MsgPack::string>>(value)) {}
+	MsgPack::MsgPack(MsgPack::string &&value)          : m_ptr(std::make_shared<Compound<MsgPack::string>>(move(value))) {}
+	MsgPack::MsgPack(const MsgPack::array &values)     : m_ptr(std::make_shared<Compound<MsgPack::array>>(values)) {}
+	MsgPack::MsgPack(MsgPack::array &&values)          : m_ptr(std::make_shared<Compound<MsgPack::array>>(move(values))) {}
+	MsgPack::MsgPack(const MsgPack::object &values)    : m_ptr(std::make_shared<Compound<MsgPack::object>>(values)) {}
+	MsgPack::MsgPack(MsgPack::object &&values)         : m_ptr(std::make_shared<Compound<MsgPack::object>>(move(values))) {}
+	MsgPack::MsgPack(const MsgPack::binary &values)    : m_ptr(std::make_shared<Compound<MsgPack::binary>>(values)) {}
+	MsgPack::MsgPack(MsgPack::binary &&values)         : m_ptr(std::make_shared<Compound<MsgPack::binary>>(move(values))) {}
+	MsgPack::MsgPack(const MsgPack::extension &values) : m_ptr(std::make_shared<Compound<MsgPack::extension>>(values)) {}
+	MsgPack::MsgPack(MsgPack::extension &&values)      : m_ptr(std::make_shared<Compound<MsgPack::extension>>(move(values))) {}
 	
 	/* * * * * * * * * * * * * * * * * * * *
  * Accessors
  */
 	
-	MsgPack::Type MsgPack::type()                                        const { return m_ptr->type(); }
-	double MsgPack::number_value()                                       const { return m_ptr->float64_value(); }
-	float MsgPack::float32_value()                                       const { return m_ptr->float32_value(); }
-	double MsgPack::float64_value()                                      const { return m_ptr->float64_value(); }
-	int32_t MsgPack::int_value()                                         const { return m_ptr->int32_value(); }
-	int8_t MsgPack::int8_value()                                         const { return m_ptr->int8_value(); }
-	int16_t MsgPack::int16_value()                                       const { return m_ptr->int16_value(); }
-	int32_t MsgPack::int32_value()                                       const { return m_ptr->int32_value(); }
-	int64_t MsgPack::int64_value()                                       const { return m_ptr->int64_value(); }
-	uint8_t MsgPack::uint8_value()                                       const { return m_ptr->uint8_value(); }
-	uint16_t MsgPack::uint16_value()                                     const { return m_ptr->uint16_value(); }
-	uint32_t MsgPack::uint32_value()                                     const { return m_ptr->uint32_value(); }
-	uint64_t MsgPack::uint64_value()                                     const { return m_ptr->uint64_value(); }
-	bool MsgPack::bool_value()                                           const { return m_ptr->bool_value(); }
-	const std::string & MsgPack::string_value()                          const { return m_ptr->string_value(); }
-	const std::deque<MsgPack>& MsgPack::array_items()                    const { return m_ptr->array_items(); }
-	const MsgPack::binary& MsgPack::binary_items()                       const { return m_ptr->binary_items(); }
-	const MsgPack::extension& MsgPack::extension_items()                 const { return m_ptr->extension_items(); }
-	const std::unordered_map<MsgPack, MsgPack> & MsgPack::object_items() const { return m_ptr->object_items(); }
-	const MsgPack & MsgPack::operator[] (size_t i)                       const { return (*m_ptr)[i]; }
-	const MsgPack & MsgPack::operator[] (const std::string &key)         const { return (*m_ptr)[key]; }
+	MsgPack::Type MsgPack::type() const{ return m_ptr->type(); }
+	//immutable type specify
+	template<typename T> requires(std::is_fundamental_v<T>)
+	MsgPack::operator T() const{return m_ptr->operator T();}
+	template<typename T> requires(!std::is_fundamental_v<T>)
+	MsgPack::operator const T&() const{return m_ptr->operator const T&();}
+	//mutable ones
+	template<typename T> requires(!std::is_const_v<T>)
+	MsgPack::operator T&(){return m_ptr->operator T&();}
 	
-	double                                MsgPackValue::number_value()            const { return 0; }
-	float                                 MsgPackValue::float32_value()           const { return 0; }
-	double                                MsgPackValue::float64_value()           const { return 0; }
-	__int128                              MsgPackValue::int_value()               const { return 0; }
-	int8_t                                MsgPackValue::int8_value()              const { return 0; }
-	int16_t                               MsgPackValue::int16_value()             const { return 0; }
-	int32_t                               MsgPackValue::int32_value()             const { return 0; }
-	int64_t                               MsgPackValue::int64_value()             const { return 0; }
-	uint8_t                               MsgPackValue::uint8_value()             const { return 0; }
-	uint16_t                              MsgPackValue::uint16_value()            const { return 0; }
-	uint32_t                              MsgPackValue::uint32_value()            const { return 0; }
-	uint64_t                              MsgPackValue::uint64_value()            const { return 0; }
-	bool                                  MsgPackValue::bool_value()              const { return false; }
-	const std::string&                    MsgPackValue::string_value()       const { return statics().empty_string; }
-	const std::deque<MsgPack>&            MsgPackValue::array_items()        const { return statics().empty_array; }
-	const MsgPack::object& MsgPackValue::object_items()                           const { return statics().empty_object; }
-	const MsgPack::binary&                MsgPackValue::binary_items()            const { return statics().empty_binary; }
-	const MsgPack::extension&             MsgPackValue::extension_items()         const { return statics().empty_extension; }
-	const MsgPack&                        MsgPackValue::operator[](size_t)        const { return static_null(); }
-	const MsgPack&                        MsgPackValue::operator[](const std::string&) const { return static_null(); }
+	template MsgPack::operator MsgPack::int8() const;
+	template MsgPack::operator MsgPack::int16() const;
+	template MsgPack::operator MsgPack::int32() const;
+	template MsgPack::operator MsgPack::int64() const;
+	template MsgPack::operator MsgPack::uint8() const;
+	template MsgPack::operator MsgPack::uint16() const;
+	template MsgPack::operator MsgPack::uint32() const;
+	template MsgPack::operator MsgPack::uint64() const;
+	template MsgPack::operator MsgPack::int128() const;
+	template MsgPack::operator MsgPack::float32() const;
+	template MsgPack::operator MsgPack::float64() const;
+	template MsgPack::operator MsgPack::boolean() const;
+	template MsgPack::operator const MsgPack::string&() const;
+	template MsgPack::operator const MsgPack::array&() const;
+	template MsgPack::operator const MsgPack::object&() const;
+	template MsgPack::operator const MsgPack::binary&() const;
+	template MsgPack::operator const MsgPack::extension&() const;
 	
-	const MsgPack & MsgPackObject::operator[] (const std::string &key) const
-	{
-		if(auto iter = m_value.find(key);(iter == m_value.end()))
-			return static_null();
-		else
-			return iter->second;
-	}
-	const MsgPack & MsgPackArray::operator[] (size_t i) const
-	{
-		if (i >= m_value.size())
-			return static_null();
-		else return m_value[i];
-	}
+	template MsgPack::operator MsgPack::int8&();
+	template MsgPack::operator MsgPack::int16&();
+	template MsgPack::operator MsgPack::int32&();
+	template MsgPack::operator MsgPack::int64&();
+	template MsgPack::operator MsgPack::uint8&();
+	template MsgPack::operator MsgPack::uint16&();
+	template MsgPack::operator MsgPack::uint32&();
+	template MsgPack::operator MsgPack::uint64&();
+	template MsgPack::operator MsgPack::int128&();
+	template MsgPack::operator MsgPack::float32&();
+	template MsgPack::operator MsgPack::float64&();
+	template MsgPack::operator MsgPack::boolean&();
+	template MsgPack::operator MsgPack::string&();
+	template MsgPack::operator MsgPack::array&();
+	template MsgPack::operator MsgPack::object&();
+	template MsgPack::operator MsgPack::binary&();
+	template MsgPack::operator MsgPack::extension&();
+	
+	const MsgPack &MsgPack::operator[] (size_t i)                     const { return m_ptr->operator[](i); }
+	MsgPack &MsgPack::operator[] (size_t i)                                 { return m_ptr->operator[](i); }
+	const MsgPack &MsgPack::operator[] (const MsgPack &key)           const { return m_ptr->operator[](key); }
+	MsgPack &MsgPack::operator[] (const MsgPack &key)                       { return m_ptr->operator[](key); }
+	
+	//immutable
+	MsgPackValue::operator MsgPack::float32             ()   const { throw TypeError(typeid(Number<MsgPack::float32>),typeid(*this)); }
+	MsgPackValue::operator MsgPack::float64             ()   const { throw TypeError(typeid(Number<MsgPack::float64>),typeid(*this)); }
+	MsgPackValue::operator MsgPack::int128              ()   const { throw TypeError(typeid(Number<MsgPack::int128>),typeid(*this)); }
+	MsgPackValue::operator MsgPack::int8                ()   const { throw TypeError(typeid(Number<MsgPack::int8>),typeid(*this)); }
+	MsgPackValue::operator MsgPack::int16               ()   const { throw TypeError(typeid(Number<MsgPack::int16>),typeid(*this)); }
+	MsgPackValue::operator MsgPack::int32               ()   const { throw TypeError(typeid(Number<MsgPack::int32>),typeid(*this)); }
+	MsgPackValue::operator MsgPack::int64               ()   const { throw TypeError(typeid(Number<MsgPack::int64>),typeid(*this)); }
+	MsgPackValue::operator MsgPack::uint8               ()   const { throw TypeError(typeid(Number<MsgPack::uint8>),typeid(*this)); }
+	MsgPackValue::operator MsgPack::uint16              ()   const { throw TypeError(typeid(Number<MsgPack::uint16>),typeid(*this)); }
+	MsgPackValue::operator MsgPack::uint32              ()   const { throw TypeError(typeid(Number<MsgPack::uint32>),typeid(*this)); }
+	MsgPackValue::operator MsgPack::uint64              ()   const { throw TypeError(typeid(Number<MsgPack::uint64>),typeid(*this)); }
+	MsgPackValue::operator MsgPack::boolean             ()   const { throw TypeError(typeid(Number<MsgPack::boolean>),typeid(*this)); }
+	MsgPackValue::operator MsgPack::string       const &()   const { throw TypeError(typeid(Compound<MsgPack::string>),typeid(*this)); }
+	MsgPackValue::operator MsgPack::array        const &()   const { throw TypeError(typeid(Compound<MsgPack::array>),typeid(*this)); }
+	MsgPackValue::operator MsgPack::object       const &()   const { throw TypeError(typeid(Compound<MsgPack::object>),typeid(*this)); }
+	MsgPackValue::operator MsgPack::binary       const &()   const { throw TypeError(typeid(Compound<MsgPack::binary>),typeid(*this)); }
+	MsgPackValue::operator MsgPack::extension    const &()   const { throw TypeError(typeid(Compound<MsgPack::extension>),typeid(*this)); }
+	//mutable
+	MsgPackValue::operator MsgPack::float32  &()         { throw TypeError(typeid(Number<MsgPack::float32>),typeid(*this)); }
+	MsgPackValue::operator MsgPack::float64  &()         { throw TypeError(typeid(Number<MsgPack::float64>),typeid(*this)); }
+	MsgPackValue::operator MsgPack::int128   &()         { throw TypeError(typeid(Number<MsgPack::int128>),typeid(*this)); }
+	MsgPackValue::operator MsgPack::int8     &()         { throw TypeError(typeid(Number<MsgPack::int8>),typeid(*this)); }
+	MsgPackValue::operator MsgPack::int16    &()         { throw TypeError(typeid(Number<MsgPack::int16>),typeid(*this)); }
+	MsgPackValue::operator MsgPack::int32    &()         { throw TypeError(typeid(Number<MsgPack::int32>),typeid(*this)); }
+	MsgPackValue::operator MsgPack::int64    &()         { throw TypeError(typeid(Number<MsgPack::int64>),typeid(*this)); }
+	MsgPackValue::operator MsgPack::uint8    &()         { throw TypeError(typeid(Number<MsgPack::uint8>),typeid(*this)); }
+	MsgPackValue::operator MsgPack::uint16   &()         { throw TypeError(typeid(Number<MsgPack::uint16>),typeid(*this)); }
+	MsgPackValue::operator MsgPack::uint32   &()         { throw TypeError(typeid(Number<MsgPack::uint32>),typeid(*this)); }
+	MsgPackValue::operator MsgPack::uint64   &()         { throw TypeError(typeid(Number<MsgPack::uint64>),typeid(*this)); }
+	MsgPackValue::operator MsgPack::boolean  &()         { throw TypeError(typeid(Number<MsgPack::boolean>),typeid(*this)); }
+	MsgPackValue::operator MsgPack::string   &()         { throw TypeError(typeid(Compound<MsgPack::string>),typeid(*this)); }
+	MsgPackValue::operator MsgPack::array    &()         { throw TypeError(typeid(Compound<MsgPack::array>),typeid(*this)); }
+	MsgPackValue::operator MsgPack::object   &()         { throw TypeError(typeid(Compound<MsgPack::object>),typeid(*this)); }
+	MsgPackValue::operator MsgPack::binary   &()         { throw TypeError(typeid(Compound<MsgPack::binary>),typeid(*this)); }
+	MsgPackValue::operator MsgPack::extension&()         { throw TypeError(typeid(Compound<MsgPack::extension>),typeid(*this)); }
+	//access
+	const MsgPack &MsgPackValue::operator[](size_t)         const { throw TypeError(typeid(Compound<MsgPack::array>),typeid(*this)); }
+	MsgPack       &MsgPackValue::operator[](size_t)               { throw TypeError(typeid(Compound<MsgPack::array>),typeid(*this)); }
+	const MsgPack &MsgPackValue::operator[](const MsgPack&) const { throw TypeError(typeid(Compound<MsgPack::object>),typeid(*this)); }
+	MsgPack       &MsgPackValue::operator[](const MsgPack&)       { throw TypeError(typeid(Compound<MsgPack::object>),typeid(*this)); }
 	
 	/* * * * * * * * * * * * * * * * * * * *
  * Comparison
  */
 	
-	bool MsgPack::operator== (const MsgPack &other) const
-	{
-		return *m_ptr==*other.m_ptr;
-	}
+	bool MsgPack::operator==(const MsgPack &other) const{return *m_ptr==*other.m_ptr;}
 	
-	std::partial_ordering MsgPack::operator<=> (const MsgPack &other) const
-	{
-		return *m_ptr<=>*other.m_ptr;
-	}
+	std::partial_ordering MsgPack::operator<=> (const MsgPack &other) const{return *m_ptr<=>*other.m_ptr;}
 	
 	namespace
 	{
@@ -898,8 +885,8 @@ namespace msgpack11
 				
 				for(uint32_t i = 0; i < bytes; ++i)
 				{
-					MsgPack key = parse_msgpack(is, depth);
-					MsgPack value = parse_msgpack(is, depth);
+					MsgPack key=parse_msgpack(is, depth);
+					MsgPack value=parse_msgpack(is, depth);
 					res.insert(std::make_pair(std::move(key), std::move(value)));
 				}
 				return res;
@@ -983,107 +970,52 @@ namespace msgpack11
      */
 			MsgPack parse_msgpack(std::istream& is, int depth)
 			{
-				static const std::array<std::function<MsgPack(std::istream&,uint8_t,size_t)>,256> parsers{[]()
+				static const std::array<std::function<MsgPack(std::istream&,uint8_t,size_t)>,256>parsers{[]()
 				{
-					using parser_template_element_type=std::tuple<uint8_t,std::function<MsgPack(std::istream&,uint8_t,size_t)>>;
-					std::array< parser_template_element_type,36> const parser_template
+					using parser_map_type=std::pair<uint8_t,std::function<MsgPack(std::istream&,uint8_t,size_t)>>;
+					std::array<parser_map_type,36> const parser_template
 					{{
-						parser_template_element_type{ 0x7fu, &MsgPackParser::parse_pos_fixint},
-						parser_template_element_type{ 0x8fu, &MsgPackParser::parse_fixobject},
-						parser_template_element_type{ 0x9fu, &MsgPackParser::parse_fixarray},
-						parser_template_element_type{ 0xbfu, &MsgPackParser::parse_fixstring},
-						parser_template_element_type{ 0xc0u, &MsgPackParser::parse_nil},
-						parser_template_element_type{ 0xc1u, &MsgPackParser::parse_invalid},
-						parser_template_element_type{ 0xc3u, &MsgPackParser::parse_bool},
-						parser_template_element_type{ 0xc4u, &MsgPackParser::parse_binary<uint8_t>},
-						parser_template_element_type{ 0xc5u, &MsgPackParser::parse_binary<uint16_t>},
-						parser_template_element_type{ 0xc6u, &MsgPackParser::parse_binary<uint32_t>},
-						parser_template_element_type{ 0xc7u, &MsgPackParser::parse_extension<uint8_t>},
-						parser_template_element_type{ 0xc8u, &MsgPackParser::parse_extension<uint16_t>},
-						parser_template_element_type{ 0xc9u, &MsgPackParser::parse_extension<uint32_t>},
-						parser_template_element_type{ 0xcau, &MsgPackParser::parse_arith<float>},
-						parser_template_element_type{ 0xcbu, &MsgPackParser::parse_arith<double>},
-						parser_template_element_type{ 0xccu, &MsgPackParser::parse_arith<uint8_t>},
-						parser_template_element_type{ 0xcdu, &MsgPackParser::parse_arith<uint16_t>},
-						parser_template_element_type{ 0xceu, &MsgPackParser::parse_arith<uint32_t>},
-						parser_template_element_type{ 0xcfu, &MsgPackParser::parse_arith<uint64_t>},
-						parser_template_element_type{ 0xd0u, &MsgPackParser::parse_arith<int8_t>},
-						parser_template_element_type{ 0xd1u, &MsgPackParser::parse_arith<int16_t>},
-						parser_template_element_type{ 0xd2u, &MsgPackParser::parse_arith<int32_t>},
-						parser_template_element_type{ 0xd3u, &MsgPackParser::parse_arith<int64_t>},
-						parser_template_element_type{ 0xd8u, &MsgPackParser::parse_fixext},
-						parser_template_element_type{ 0xd9u, &MsgPackParser::parse_string<uint8_t>},
-						parser_template_element_type{ 0xdau, &MsgPackParser::parse_string<uint16_t>},
-						parser_template_element_type{ 0xdbu, &MsgPackParser::parse_string<uint32_t>},
-						parser_template_element_type{ 0xdcu, &MsgPackParser::parse_array<uint16_t>},
-						parser_template_element_type{ 0xddu, &MsgPackParser::parse_array<uint32_t>},
-						parser_template_element_type{ 0xdeu, &MsgPackParser::parse_object<uint16_t>},
-						parser_template_element_type{ 0xdfu, &MsgPackParser::parse_object<uint32_t>},
-						parser_template_element_type{ 0xffu, &MsgPackParser::parse_neg_fixint}
+						parser_map_type{0x7fu,MsgPackParser::parse_pos_fixint},
+						parser_map_type{0x8fu,MsgPackParser::parse_fixobject},
+						parser_map_type{0x9fu,MsgPackParser::parse_fixarray},
+						parser_map_type{0xbfu,MsgPackParser::parse_fixstring},
+						parser_map_type{0xc0u,MsgPackParser::parse_nil},
+						parser_map_type{0xc1u,MsgPackParser::parse_invalid},
+						parser_map_type{0xc3u,MsgPackParser::parse_bool},
+						parser_map_type{0xc4u,MsgPackParser::parse_binary<uint8_t>},
+						parser_map_type{0xc5u,MsgPackParser::parse_binary<uint16_t>},
+						parser_map_type{0xc6u,MsgPackParser::parse_binary<uint32_t>},
+						parser_map_type{0xc7u,MsgPackParser::parse_extension<uint8_t>},
+						parser_map_type{0xc8u,MsgPackParser::parse_extension<uint16_t>},
+						parser_map_type{0xc9u,MsgPackParser::parse_extension<uint32_t>},
+						parser_map_type{0xcau,MsgPackParser::parse_arith<float>},
+						parser_map_type{0xcbu,MsgPackParser::parse_arith<double>},
+						parser_map_type{0xccu,MsgPackParser::parse_arith<uint8_t>},
+						parser_map_type{0xcdu,MsgPackParser::parse_arith<uint16_t>},
+						parser_map_type{0xceu,MsgPackParser::parse_arith<uint32_t>},
+						parser_map_type{0xcfu,MsgPackParser::parse_arith<uint64_t>},
+						parser_map_type{0xd0u,MsgPackParser::parse_arith<int8_t>},
+						parser_map_type{0xd1u,MsgPackParser::parse_arith<int16_t>},
+						parser_map_type{0xd2u,MsgPackParser::parse_arith<int32_t>},
+						parser_map_type{0xd3u,MsgPackParser::parse_arith<int64_t>},
+						parser_map_type{0xd8u,MsgPackParser::parse_fixext},
+						parser_map_type{0xd9u,MsgPackParser::parse_string<uint8_t>},
+						parser_map_type{0xdau,MsgPackParser::parse_string<uint16_t>},
+						parser_map_type{0xdbu,MsgPackParser::parse_string<uint32_t>},
+						parser_map_type{0xdcu,MsgPackParser::parse_array<uint16_t>},
+						parser_map_type{0xddu,MsgPackParser::parse_array<uint32_t>},
+						parser_map_type{0xdeu,MsgPackParser::parse_object<uint16_t>},
+						parser_map_type{0xdfu,MsgPackParser::parse_object<uint32_t>},
+						parser_map_type{0xffu,MsgPackParser::parse_neg_fixint}
 					}};
 					
 					std::array<std::function<MsgPack(std::istream&,uint8_t,size_t)>,256> parsers;
 					int i=0;
-					std::for_each
-					(
-						std::begin(parser_template),
-						std::end(parser_template),
-						[&parsers,&i](parser_template_element_type const& element)
-						{
-							int upto=std::get<0>(element);
-							auto parser=std::get<1>(element);
-							while(i<=upto)
-							{
-								parsers[i]=std::function(parser);
-								++i;
-							}
-						});
+					for(const auto &parser:parser_template)
+						for(;i<=parser.first;i++)
+							parsers[i]=parser.second;
 					return parsers;
 				}()};
-				
-//				static std::unordered_map<uint8_t,std::function<MsgPack(std::istream&,uint8_t,int)>>parsers
-//				{
-//					{ 0x7fu, &MsgPackParser::parse_pos_fixint},
-//					{ 0x8fu, &MsgPackParser::parse_fixobject},
-//					{ 0x9fu, &MsgPackParser::parse_fixarray},
-//					{ 0xbfu, &MsgPackParser::parse_fixstring},
-//					{ 0xc0u, &MsgPackParser::parse_nil},
-//					{ 0xc1u, &MsgPackParser::parse_invalid},
-//					{ 0xc3u, &MsgPackParser::parse_bool},
-//					{ 0xc4u, &MsgPackParser::parse_binary<uint8_t>},
-//					{ 0xc5u, &MsgPackParser::parse_binary<uint16_t>},
-//					{ 0xc6u, &MsgPackParser::parse_binary<uint32_t>},
-//					{ 0xc7u, &MsgPackParser::parse_extension<uint8_t>},
-//					{ 0xc8u, &MsgPackParser::parse_extension<uint16_t>},
-//					{ 0xc9u, &MsgPackParser::parse_extension<uint32_t>},
-//					{ 0xcau, &MsgPackParser::parse_arith<float>},
-//					{ 0xcbu, &MsgPackParser::parse_arith<double>},
-//					{ 0xccu, &MsgPackParser::parse_arith<uint8_t>},
-//					{ 0xcdu, &MsgPackParser::parse_arith<uint16_t>},
-//					{ 0xceu, &MsgPackParser::parse_arith<uint32_t>},
-//					{ 0xcfu, &MsgPackParser::parse_arith<uint64_t>},
-//					{ 0xd0u, &MsgPackParser::parse_arith<int8_t>},
-//					{ 0xd1u, &MsgPackParser::parse_arith<int16_t>},
-//					{ 0xd2u, &MsgPackParser::parse_arith<int32_t>},
-//					{ 0xd3u, &MsgPackParser::parse_arith<int64_t>},
-//					{ 0xd8u, &MsgPackParser::parse_fixext},
-//					{ 0xd9u, &MsgPackParser::parse_string<uint8_t>},
-//					{ 0xdau, &MsgPackParser::parse_string<uint16_t>},
-//					{ 0xdbu, &MsgPackParser::parse_string<uint32_t>},
-//					{ 0xdcu, &MsgPackParser::parse_array<uint16_t>},
-//					{ 0xddu, &MsgPackParser::parse_array<uint32_t>},
-//					{ 0xdeu, &MsgPackParser::parse_object<uint16_t>},
-//					{ 0xdfu, &MsgPackParser::parse_object<uint32_t>},
-//					{ 0xffu, &MsgPackParser::parse_neg_fixint}
-//				};
-				/*
-				if (max_depth < depth)
-				{
-					// "exceeded maximum nesting depth."
-					return fail(is);
-				}
-				*/
-				
 				auto const first_byte{is.get()};
 				// check for fail/eof after get() as eof only set after read past the end
 				if (is.fail() || is.eof())
@@ -1105,13 +1037,13 @@ namespace msgpack11
 	
 	std::istream& operator>>(std::istream& is, MsgPack& msgpack)
 	{
-		msgpack = MsgPackParser::parse_msgpack(is, 0);
+		msgpack=MsgPackParser::parse_msgpack(is,0);
 		return is;
 	}
 	
 	MsgPack MsgPack::parse(std::istream& is)
 	{
-		return MsgPackParser::parse_msgpack(is, 0);
+		return MsgPackParser::parse_msgpack(is,0);
 	}
 	
 	MsgPack MsgPack::parse(std::istream& is, std::string &err)
@@ -1186,7 +1118,7 @@ size_t std::hash<msgpack11::MsgPack>::operator()(const msgpack11::MsgPack &thing
 	{
 	case msgpack11::MsgPack::Type::FLOAT32:
 	case msgpack11::MsgPack::Type::FLOAT64:
-		return std::bit_cast<size_t>(thing.m_ptr->float64_value());
+		return std::bit_cast<size_t>(thing.m_ptr->operator ::msgpack11::MsgPack::float64());
 	case msgpack11::MsgPack::Type::NUMBER:
 	case msgpack11::MsgPack::Type::INT:
 	case msgpack11::MsgPack::Type::INT8:
@@ -1198,9 +1130,9 @@ size_t std::hash<msgpack11::MsgPack>::operator()(const msgpack11::MsgPack &thing
 	case msgpack11::MsgPack::Type::UINT32:
 	case msgpack11::MsgPack::Type::UINT64:  
 	case msgpack11::MsgPack::Type::BOOL:
-		return thing.m_ptr->uint64_value();
+		return thing.m_ptr->operator ::msgpack11::MsgPack::uint64();
 	case msgpack11::MsgPack::Type::STRING:
-		return std::hash<std::string>()(thing.m_ptr->string_value());
+		return std::hash<std::string>()(thing.m_ptr->operator const ::msgpack11::MsgPack::string&());
 	case msgpack11::MsgPack::Type::BINARY:
 	case msgpack11::MsgPack::Type::ARRAY:  
 	case msgpack11::MsgPack::Type::OBJECT:
